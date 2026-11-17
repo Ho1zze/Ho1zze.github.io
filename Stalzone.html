@@ -1,0 +1,1021 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stalzone — Текстовый Сталкер</title>
+    <!-- Подключаем Tailwind CSS для сетки и базового оформления -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Подключаем шрифты Orbitron и Share Tech Mono для сталкерского ретро-футуристичного стиля -->
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Share Tech Mono', monospace;
+            background-color: #0b0f0c;
+            color: #d1d5db;
+        }
+        .title-font {
+            font-family: 'Orbitron', sans-serif;
+        }
+        /* Стилизация скроллбаров в стиле терминала ПДА */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #09120a;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #15803d;
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #16a34a;
+        }
+        .crt-scanlines {
+            background: linear-gradient(
+                rgba(18, 16, 16, 0) 50%, 
+                rgba(0, 0, 0, 0.25) 50%
+            ), linear-gradient(
+                90deg,
+                rgba(255, 0, 0, 0.03),
+                rgba(0, 255, 0, 0.01),
+                rgba(0, 0, 255, 0.03)
+            );
+            background-size: 100% 3px, 3px 100%;
+            pointer-events: none;
+        }
+        @keyframes pulse-glow {
+            0%, 100% { text-shadow: 0 0 5px rgba(34, 197, 94, 0.5); }
+            50% { text-shadow: 0 0 15px rgba(34, 197, 94, 0.9); }
+        }
+        .pda-glow {
+            animation: pulse-glow 3s infinite;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-between p-2 sm:p-4 relative select-none">
+
+    <!-- ЭЛТ Эффект (сканлайны) поверх экрана -->
+    <div class="fixed inset-0 crt-scanlines z-50 pointer-events-none"></div>
+
+    <!-- Всплывающие уведомления (кастомные вместо alert) -->
+    <div id="modal-container" class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center hidden p-4">
+        <div id="modal-box" class="bg-neutral-900 border-2 border-emerald-600/60 p-6 rounded-lg max-w-md w-full shadow-2xl shadow-emerald-900/30">
+            <h3 id="modal-title" class="title-font text-xl text-emerald-400 font-bold mb-3 tracking-wider">ВНИМАНИЕ</h3>
+            <p id="modal-text" class="text-neutral-300 mb-6 text-sm sm:text-base leading-relaxed"></p>
+            <div class="flex justify-end">
+                <button onclick="closeModal()" class="px-5 py-2 bg-emerald-800 hover:bg-emerald-700 text-emerald-100 font-bold rounded border border-emerald-500 transition shadow">ПРИНЯТЬ</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Звуковое сопровождение (синтезатор Web Audio API) -->
+    <div class="absolute top-2 right-2 z-40 flex items-center gap-2 bg-neutral-900/90 border border-emerald-800/40 px-3 py-1.5 rounded text-xs">
+        <span class="text-emerald-400">АУДИОПДА:</span>
+        <button id="audio-toggle" onclick="toggleAudio()" class="px-2 py-0.5 bg-neutral-800 text-neutral-300 hover:text-emerald-300 border border-neutral-700 rounded transition">ВЫКЛ</button>
+    </div>
+
+    <!-- Основной контейнер ПДА -->
+    <div class="w-full max-w-5xl bg-neutral-950 border-2 border-emerald-700/50 rounded-lg shadow-2xl flex flex-col h-[94vh] max-h-[850px] overflow-hidden z-10 my-auto">
+        
+        <!-- Шапка ПДА -->
+        <header class="bg-neutral-900 border-b border-emerald-700/40 p-3 sm:px-6 flex flex-wrap items-center justify-between gap-3">
+            <div class="flex items-center gap-3">
+                <div class="w-3 h-3 rounded-full bg-emerald-500 animate-ping"></div>
+                <h1 class="title-font text-lg sm:text-xl font-bold tracking-widest text-emerald-400 pda-glow">STALZONE // ПДА v4.2</h1>
+            </div>
+            <div id="pda-stats-header" class="hidden sm:flex items-center gap-4 text-xs text-neutral-400">
+                <span>ЗДОРОВЬЕ: <strong id="head-hp" class="text-emerald-400">100</strong>%</span>
+                <span>РАДИАЦИЯ: <strong id="head-rad" class="text-emerald-400">0</strong> мЗв</span>
+                <span>РУБЛИ: <strong id="head-rub" class="text-amber-400">1500</strong> ₽</span>
+            </div>
+        </header>
+
+        <!-- Основная рабочая область ПДА -->
+        <div class="flex-1 flex flex-col md:flex-row overflow-hidden">
+            
+            <!-- Левая панель: Статус и Навигация по вкладкам -->
+            <aside class="w-full md:w-72 bg-neutral-900/60 border-r border-emerald-800/30 p-4 flex flex-col justify-between shrink-0">
+                <div class="space-y-4">
+                    <!-- Данные сталкера -->
+                    <div class="bg-neutral-900 border border-emerald-800/30 p-3 rounded">
+                        <div class="text-xs text-emerald-500 mb-1 font-bold">ПОЗЫВНОЙ: <span id="player-name-display" class="text-neutral-200">Ржавый</span></div>
+                        <div class="text-xs text-emerald-500 mb-2 font-bold">ЛАГЕРЬ: <span id="player-camp-display" class="text-neutral-200">Бар «100 рентген»</span></div>
+                        
+                        <div class="space-y-2 mt-3 pt-3 border-t border-neutral-800 text-xs">
+                            <div>
+                                <div class="flex justify-between mb-1">
+                                    <span>Здоровье</span>
+                                    <span id="stat-hp-val">100/100</span>
+                                </div>
+                                <div class="w-full bg-neutral-800 h-2 rounded overflow-hidden">
+                                    <div id="bar-hp" class="bg-emerald-500 h-full transition-all duration-300" style="width: 100%"></div>
+                                </div>
+                            </div>
+                            <div>
+                                <div class="flex justify-between mb-1">
+                                    <span>Радиация</span>
+                                    <span id="stat-rad-val">0 мЗв</span>
+                                </div>
+                                <div class="w-full bg-neutral-800 h-2 rounded overflow-hidden">
+                                    <div id="bar-rad" class="bg-amber-500 h-full transition-all duration-300" style="width: 0%"></div>
+                                </div>
+                            </div>
+                            <div>
+                                <div class="flex justify-between mb-1">
+                                    <span>Вес (кг)</span>
+                                    <span id="stat-weight-val">12.4 / 40 кг</span>
+                                </div>
+                                <div class="w-full bg-neutral-800 h-2 rounded overflow-hidden">
+                                    <div id="bar-weight" class="bg-blue-500 h-full transition-all duration-300" style="width: 31%"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Навигационные кнопки ПДА -->
+                    <nav class="space-y-1.5">
+                        <button onclick="switchTab('hub')" id="tab-btn-hub" class="w-full text-left px-3 py-2 rounded text-sm font-semibold transition bg-emerald-950/60 border border-emerald-600/40 text-emerald-300 flex items-center justify-between">
+                            <span>🏕️ База / Лагерь</span>
+                            <span class="text-xs text-emerald-600">HUB</span>
+                        </button>
+                        <button onclick="switchTab('excursion')" id="tab-btn-excursion" class="w-full text-left px-3 py-2 rounded text-sm font-semibold transition bg-neutral-900 hover:bg-neutral-800 text-neutral-300 flex items-center justify-between">
+                            <span>☢️ Вылазка в Зону</span>
+                            <span class="text-xs text-neutral-500">ZONE</span>
+                        </button>
+                        <button onclick="switchTab('inventory')" id="tab-btn-inventory" class="w-full text-left px-3 py-2 rounded text-sm font-semibold transition bg-neutral-900 hover:bg-neutral-800 text-neutral-300 flex items-center justify-between">
+                            <span>🎒 Снаряжение</span>
+                            <span class="text-xs text-neutral-500">INV</span>
+                        </button>
+                        <button onclick="switchTab('trader')" id="tab-btn-trader" class="w-full text-left px-3 py-2 rounded text-sm font-semibold transition bg-neutral-900 hover:bg-neutral-800 text-neutral-300 flex items-center justify-between">
+                            <span>🤝 Торговец Сидорович</span>
+                            <span class="text-xs text-neutral-500">SHOP</span>
+                        </button>
+                        <button onclick="switchTab('campfire')" id="tab-btn-campfire" class="w-full text-left px-3 py-2 rounded text-sm font-semibold transition bg-neutral-900 hover:bg-neutral-800 text-neutral-300 flex items-center justify-between">
+                            <span>🔥 У костра (Байки)</span>
+                            <span class="text-xs text-neutral-500">REST</span>
+                        </button>
+                    </nav>
+                </div>
+
+                <!-- Кнопки быстрого сохранения / сброса -->
+                <div class="pt-4 border-t border-neutral-800 flex gap-2 text-xs">
+                    <button onclick="saveGame()" class="flex-1 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-emerald-400 border border-emerald-900 rounded transition font-bold">СОХРАНИТЬ</button>
+                    <button onclick="resetGame()" class="px-3 py-1.5 bg-neutral-900 hover:bg-red-950 text-red-400 border border-red-950 rounded transition" title="Сбросить прогресс">СБРОС</button>
+                </div>
+            </aside>
+
+            <!-- Правая панель: Динамический контент -->
+            <main class="flex-1 bg-neutral-950 p-4 sm:p-6 overflow-y-auto flex flex-col justify-between">
+                
+                <!-- ВКЛАДКА 1: БАЗА / ЛАГЕРЬ -->
+                <div id="tab-content-hub" class="tab-pane space-y-6">
+                    <div>
+                        <h2 class="title-font text-xl text-emerald-400 font-bold mb-2">БЕЗОПАСНАЯ ЗОНА</h2>
+                        <p class="text-sm text-neutral-400 leading-relaxed">Вы находитесь в укрепленном лагере. Здесь можно передохнуть от аномалий, почистить ствол, пополнить запасы у торговца или отправиться в глубь Зоны за артефактами.</p>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div class="bg-neutral-900/80 border border-emerald-900/40 p-4 rounded-lg flex flex-col justify-between">
+                            <div>
+                                <h3 class="font-bold text-emerald-300 text-base mb-1">Сменить точку базирования</h3>
+                                <p class="text-xs text-neutral-400 mb-4">Выберите опорный лагерь для восстановления сил:</p>
+                                <div id="camp-selector-list" class="space-y-2 mb-4">
+                                    <!-- Генерируется через JS -->
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="bg-neutral-900/80 border border-emerald-900/40 p-4 rounded-lg flex flex-col justify-between">
+                            <div>
+                                <h3 class="font-bold text-emerald-300 text-base mb-1">Медпункт / Сон</h3>
+                                <p class="text-xs text-neutral-400 mb-4">Восстановить здоровье (50 ₽) или вывести радиоактивные токсины (100 ₽).</p>
+                            </div>
+                            <div class="flex gap-2">
+                                <button onclick="healAtBase()" class="flex-1 py-2 bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border border-emerald-700 rounded text-xs font-bold transition">ЛЕЧИТЬСЯ (50₽)</button>
+                                <button onclick="cleanRadAtBase()" class="flex-1 py-2 bg-amber-950 hover:bg-amber-900 text-amber-300 border border-amber-700 rounded text-xs font-bold transition">ДЕАКТИВАЦИЯ (100₽)</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-neutral-900/60 border border-neutral-800 p-4 rounded-lg">
+                        <h3 class="text-xs font-bold text-emerald-500 uppercase tracking-wider mb-2">Сводка ПДА о текущей обстановке</h3>
+                        <p id="hub-lore-text" class="text-xs text-neutral-300 italic">"Внимание всем сталкерам! На Кордоне замечена повышенная активность слепых псов. На Свалке зафиксирован слабый выброс. Будьте осторожны при выходе на открытые пространства."</p>
+                    </div>
+                </div>
+
+                <!-- ВКЛАДКА 2: ВЫЛАЗКА В ЗОНУ -->
+                <div id="tab-content-excursion" class="tab-pane hidden space-y-6">
+                    <div>
+                        <h2 class="title-font text-xl text-emerald-400 font-bold mb-2">РАЗВЕДКА И ВЫЛАЗКА</h2>
+                        <p class="text-sm text-neutral-400 leading-relaxed">Выберите сектор для поиска хабара, артефактов и схронов. Опасайтесь мутантов, бандитов и аномалий!</p>
+                    </div>
+
+                    <!-- Выбор направления вылазки -->
+                    <div id="zone-selection-panel" class="space-y-4">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3" id="zones-grid">
+                            <!-- Заполняется JS -->
+                        </div>
+                    </div>
+
+                    <!-- Экран активной вылазки / события -->
+                    <div id="zone-action-panel" class="hidden bg-neutral-900 border border-emerald-800/50 p-5 rounded-lg space-y-4">
+                        <div class="flex justify-between items-center border-b border-neutral-800 pb-3">
+                            <span id="zone-event-location" class="text-xs text-emerald-400 font-bold uppercase tracking-wider">ЛОКАЦИЯ: СЕКТОР</span>
+                            <span id="zone-event-step" class="text-xs text-neutral-400">Шаг 1 / 3</span>
+                        </div>
+
+                        <div id="zone-event-description" class="text-sm text-neutral-200 leading-relaxed min-h-[80px]">
+                            Текст события...
+                        </div>
+
+                        <!-- Интерактивные варианты действий в событии -->
+                        <div id="zone-event-choices" class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2">
+                            <!-- Кнопки выбора -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ВКЛАДКА 3: ИНВЕНТАРЬ -->
+                <div id="tab-content-inventory" class="tab-pane hidden space-y-6">
+                    <div>
+                        <h2 class="title-font text-xl text-emerald-400 font-bold mb-2">СНАРЯЖЕНИЕ СТАЛКЕРА</h2>
+                        <p class="text-sm text-neutral-400 leading-relaxed">Ваш рюкзак и экипировка. Используйте медикаменты или еду прямо отсюда.</p>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <!-- Экипировка -->
+                        <div class="bg-neutral-900 border border-emerald-900/40 p-4 rounded-lg space-y-3">
+                            <h3 class="text-xs font-bold text-emerald-400 uppercase tracking-wider">Экипировка</h3>
+                            <div class="space-y-2 text-xs">
+                                <div class="bg-neutral-950 p-2.5 rounded border border-neutral-800">
+                                    <span class="text-neutral-500 block">Костюм:</span>
+                                    <strong id="inv-armor" class="text-neutral-200">Куртка новичка</strong>
+                                </div>
+                                <div class="bg-neutral-950 p-2.5 rounded border border-neutral-800">
+                                    <span class="text-neutral-500 block">Оружие:</span>
+                                    <strong id="inv-weapon" class="text-neutral-200">Пистолет ПМ</strong>
+                                </div>
+                                <div class="bg-neutral-950 p-2.5 rounded border border-neutral-800 flex justify-between items-center">
+                                    <div>
+                                        <span class="text-neutral-500 block">Патроны 9x18:</span>
+                                        <strong id="inv-ammo" class="text-amber-400">24 шт.</strong>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Предметы в инвентаре -->
+                        <div class="md:col-span-2 bg-neutral-900 border border-neutral-800 p-4 rounded-lg flex flex-col justify-between">
+                            <div>
+                                <h3 class="text-xs font-bold text-emerald-400 uppercase tracking-wider mb-3">Содержимое рюкзака</h3>
+                                <div id="inventory-items-grid" class="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-60 overflow-y-auto pr-1">
+                                    <!-- Динамический список -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ВКЛАДКА 4: ТОРГОВЕЦ СИДОРОВИЧ -->
+                <div id="tab-content-trader" class="tab-pane hidden space-y-6">
+                    <div class="flex items-center justify-between border-b border-neutral-800 pb-3">
+                        <div>
+                            <h2 class="title-font text-xl text-emerald-400 font-bold">ТОРГОВЕЦ СИДОРОВИЧ</h2>
+                            <p class="text-xs text-neutral-400">"Ну кажи, чего принес или что купить хочешь?"</p>
+                        </div>
+                        <div class="text-right">
+                            <span class="text-xs text-neutral-400 block">Ваш баланс:</span>
+                            <strong id="trader-rubles" class="text-amber-400 text-lg">1500 ₽</strong>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <!-- Товары на продажу -->
+                        <div class="bg-neutral-900 border border-neutral-800 p-4 rounded-lg space-y-3">
+                            <h3 class="text-xs font-bold text-emerald-400 uppercase tracking-wider">Купить снаряжение</h3>
+                            <div id="shop-items-list" class="space-y-2 max-h-64 overflow-y-auto pr-1">
+                                <!-- Заполняется через JS -->
+                            </div>
+                        </div>
+
+                        <!-- Продать артефакты и хлам -->
+                        <div class="bg-neutral-900 border border-neutral-800 p-4 rounded-lg flex flex-col justify-between">
+                            <div>
+                                <h3 class="text-xs font-bold text-amber-400 uppercase tracking-wider mb-3">Продать хабар</h3>
+                                <div id="sell-items-list" class="space-y-2 max-h-52 overflow-y-auto pr-1 mb-4">
+                                    <!-- Заполняется через JS -->
+                                </div>
+                            </div>
+                            <button onclick="sellAllJunk()" class="w-full py-2 bg-amber-950/60 hover:bg-amber-900 text-amber-300 border border-amber-700/50 rounded text-xs font-bold transition">ПРОДАТЬ ВЕСЬ МУСОР И АРТЕФАКТЫ</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ВКЛАДКА 5: У КОСТРА -->
+                <div id="tab-content-campfire" class="tab-pane hidden space-y-6">
+                    <div>
+                        <h2 class="title-font text-xl text-emerald-400 font-bold mb-2">У КОСТРА С БРАТЬЯМИ-СТАЛКЕРАМИ</h2>
+                        <p class="text-sm text-neutral-400 leading-relaxed">Безопасное место, где можно послушать байки бывалых, потравить анекдоты и восстановить душевное равновесие.</p>
+                    </div>
+
+                    <div class="bg-neutral-900 border border-emerald-900/40 p-5 rounded-lg space-y-4">
+                        <div id="campfire-story-box" class="bg-neutral-950 p-4 rounded border border-neutral-800 text-neutral-300 text-sm leading-relaxed min-h-[100px] flex items-center italic">
+                            "Садись ближе к огню, новичок. Сейчас расскажу, как наш старый знакомый Шустрый за контроллером в забытый тоннель ходил..."
+                        </div>
+                        <div class="flex flex-wrap gap-2">
+                            <button onclick="nextCampfireStory()" class="px-4 py-2 bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border border-emerald-700 rounded text-xs font-bold transition">ПОСЛУШАТЬ ЕЩЕ БАЙКУ</button>
+                            <button onclick="singGuitarSong()" class="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-amber-300 border border-neutral-600 rounded text-xs font-bold transition">🎸 СЫГРАТЬ НА ГИТАРЕ</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Подвал ПДА -->
+                <footer class="mt-6 pt-3 border-t border-neutral-900 flex flex-wrap justify-between items-center text-xs text-neutral-500">
+                    <div>STALZONE v1.0.0 // ЗОНА ОТЧУЖДЕНИЯ</div>
+                    <div id="footer-status" class="text-emerald-500 font-bold">СИСТЕМА В НОРМЕ</div>
+                </footer>
+
+            </main>
+        </div>
+    </div>
+
+    <!-- Игровой скрипт логики -->
+    <script>
+        // --- СОСТОЯНИЕ ИГРЫ ---
+        let game = {
+            name: "Ржавый",
+            camp: "Бар «100 рентген»",
+            hp: 100,
+            maxHp: 100,
+            radiation: 0,
+            rubles: 1500,
+            maxWeight: 40,
+            armor: { name: "Куртка новичка", protection: 2, weight: 3 },
+            weapon: { name: "Пистолет ПМ", damage: 15, ammoType: "9x18", weight: 1.5 },
+            ammo: 24,
+            inventory: [
+                { id: "bandage", name: "Бинт", type: "med", count: 3, weight: 0.1, desc: "Останавливает кровотечение и лечит (+25 HP)" },
+                { id: "medkit", name: "Аптечка АИ-2", type: "med", count: 1, weight: 0.3, desc: "Восстанавливает много здоровья (+70 HP)" },
+                { id: "bread", name: "Батон «БХЗ»", type: "food", count: 2, weight: 0.4, desc: "Немного утоляет голод" },
+                { id: "antirad", name: "Антирад", type: "rad", count: 1, weight: 0.1, desc: "Выводит радиацию (-30 мЗв)" }
+            ],
+            currentTab: "hub",
+            activeExcursion: null
+        };
+
+        // Лагеря
+        const camps = [
+            { name: "Бар «100 рентген»", desc: "Центр торговли и безопасности в Баре.", safe: true },
+            { name: "Деревня новичков (Кордон)", desc: "Тихое место на юге Зоны у костра.", safe: true },
+            { name: "Лагерь на Свалке", desc: "Ближе к аномалиям, постоянный ветер.", safe: true }
+        ];
+
+        // Доступные зоны для вылазок
+        const zones = [
+            { id: "cordon_forest", name: "Лесной массив", danger: 1, desc: "Спокойный лес с редкими аномалиями и слепыми псами.", icon: "🌲" },
+            { id: "garbage_depot", name: "Заброшенный склад", danger: 2, desc: "Металлолом, схроны бандитов и фонящие груды.", icon: "🏭" },
+            { id: "anomaly_ravine", name: "Аномальный овраг", danger: 3, desc: "Опасное место, изобилующее редкими артефактами.", icon: "⚡" },
+            { id: "dead_village", name: "Мертвый хутор", danger: 4, desc: "Мрачное место, где обитают мутанты и мародеры.", icon: "💀" }
+        ];
+
+        // Магазин Сидоровича
+        const shopItems = [
+            { id: "pistol", name: "Пистолет ПМ", type: "weapon", price: 1200, damage: 15, weight: 1.5, desc: "Надежный советский ствол." },
+            { id: "shotgun", name: "Обрез БМ-16", type: "weapon", price: 3500, damage: 45, weight: 3.2, desc: "Убойная вещь на ближней дистанции." },
+            { id: "assault", name: "АК-74У", type: "weapon", price: 7500, damage: 35, weight: 2.8, desc: "Автомат Калашникова укороченный." },
+            { id: "zarya", name: "Костюм «Заря»", type: "armor", price: 5000, protection: 6, weight: 6.0, desc: "Сталкерский комбинезон с легкой броней." },
+            { id: "seva", name: "Костюм «СЕВА»", type: "сения", price: 18000, protection: 15, weight: 9.0, desc: "Отличная защита от аномалий и радиации." },
+            { id: "bandage", name: "Бинт", type: "item", price: 80, count: 1, weight: 0.1, desc: "Медицинский бинт." },
+            { id: "medkit", name: "Аптечка АИ-2", type: "item", price: 350, count: 1, weight: 0.3, desc: "Сталкерская аптечка." },
+            { id: "antirad", name: "Антирад", type: "item", price: 400, count: 1, weight: 0.1, desc: "Препарат против радиации." },
+            { id: "ammo_box", name: "Патроны 9x18 (30 шт)", type: "ammo", price: 300, count: 30, weight: 0.5, desc: "Боеприпасы для пистолета." }
+        ];
+
+        // Сборник сталкерских байк
+        const campfireStories = [
+            "Говорят, на Севере Зоны есть «Исполнитель Желаний». Только вот те, кто дошел, назад не возвращаются — или возвращаются, но совсем другими...",
+            "Шел я как-то через «Жарку», смотрю — артефакт «Кровь камня» прямо в центре аномалии лежит. Ну, думаю, повезло! Болт кинул, прыгнул... Еле ноги унес, костюм подпалил, но артефакт утащил!",
+            "Анекдот в тему: Идут два новичка по Зоне. Один другому: — Слушай, а что это за звук странный? — Да это контроллер мозги пудрит. — А-а, ну ладно... Ой, смотри, какая шапка красивая летит!",
+            "Был у нас случай на Дикой территории. Наемники зажали группу у ангара, так наш Семёныч гранату прямо в люк БТР закинул. Ух грохоту было!",
+            "Самое главное в Зоне — не верь слепым псам, когда они скулят. Притворяются дохлыми, а потом вдвоем за жопу цапнут!"
+        ];
+
+        // --- УПРАВЛЕНИЕ ВКЛАДКАМИ ---
+        function switchTab(tabId) {
+            game.currentTab = tabId;
+            document.querySelectorAll('.tab-pane').forEach(el => el.classList.add('hidden'));
+            document.getElementById(`tab-content-${tabId}`).classList.remove('hidden');
+
+            // Подсветка кнопок
+            document.querySelectorAll('aside nav button').forEach(btn => {
+                btn.className = "w-full text-left px-3 py-2 rounded text-sm font-semibold transition bg-neutral-900 hover:bg-neutral-800 text-neutral-300 flex items-center justify-between";
+            });
+            const activeBtn = document.getElementById(`tab-btn-${tabId}`);
+            if (activeBtn) {
+                activeBtn.className = "w-full text-left px-3 py-2 rounded text-sm font-semibold transition bg-emerald-950/60 border border-emerald-600/40 text-emerald-300 flex items-center justify-between";
+            }
+
+            renderUI();
+        }
+
+        // --- МОДАЛЬНОЕ ОКНО (ВМЕСТО ALERT) ---
+        function showModal(title, text) {
+            document.getElementById('modal-title').innerText = title;
+            document.getElementById('modal-text').innerText = text;
+            document.getElementById('modal-container').classList.remove('hidden');
+        }
+
+        function closeModal() {
+            document.getElementById('modal-container').classList.add('hidden');
+        }
+
+        // --- РЕНДЕРИНГ ИНТЕРФЕЙСА ---
+        function renderUI() {
+            // Статы в шапке
+            document.getElementById('head-hp').innerText = game.hp;
+            document.getElementById('head-rad').innerText = game.radiation;
+            document.getElementById('head-rub').innerText = game.rubles;
+
+            // Сайдбар
+            document.getElementById('player-name-display').innerText = game.name;
+            document.getElementById('player-camp-display').innerText = game.camp;
+            document.getElementById('stat-hp-val').innerText = `${game.hp}/${game.maxHp}`;
+            document.getElementById('stat-rad-val').innerText = `${game.radiation} мЗв`;
+            
+            let currentWeight = calculateWeight();
+            document.getElementById('stat-weight-val').innerText = `${currentWeight.toFixed(1)} / ${game.maxWeight} кг`;
+
+            // Прогресс-бары
+            document.getElementById('bar-hp').style.width = `${(game.hp / game.maxHp) * 100}%`;
+            document.getElementById('bar-rad').style.width = `${Math.min(100, (game.radiation / 100) * 100)}%`;
+            document.getElementById('bar-weight').style.width = `${Math.min(100, (currentWeight / game.maxWeight) * 100)}%`;
+
+            // Отрисовка лагерей
+            renderCamps();
+            // Отрисовка зон вылазки
+            renderZones();
+            // Отрисовка инвентаря
+            renderInventory();
+            // Отрисовка магазина
+            renderTrader();
+        }
+
+        function calculateWeight() {
+            let total = game.armor.weight + game.weapon.weight;
+            game.inventory.forEach(item => {
+                let baseW = 0.1;
+                if (item.type === 'med') baseW = 0.2;
+                if (item.type === 'food') baseW = 0.4;
+                if (item.type === 'artifact') baseW = 0.8;
+                total += baseW * item.count;
+            });
+            return total;
+        }
+
+        function renderCamps() {
+            const container = document.getElementById('camp-selector-list');
+            container.innerHTML = '';
+            camps.forEach(c => {
+                let isCurrent = c.name === game.camp;
+                let btn = document.createElement('div');
+                btn.className = `p-2.5 rounded border text-xs flex justify-between items-center transition ${isCurrent ? 'bg-emerald-950/40 border-emerald-600 text-emerald-300' : 'bg-neutral-950 border-neutral-800 text-neutral-400'}`;
+                btn.innerHTML = `
+                    <div>
+                        <strong class="block text-neutral-200">${c.name}</strong>
+                        <span>${c.desc}</span>
+                    </div>
+                    ${isCurrent ? '<span class="text-emerald-400 font-bold">ТЕКУЩИЙ</span>' : `<button onclick="setCamp('${c.name}')" class="px-2.5 py-1 bg-neutral-800 hover:bg-emerald-900 text-neutral-200 rounded border border-neutral-700">ПЕРЕЙТИ</button>`}
+                `;
+                container.appendChild(btn);
+            });
+        }
+
+        function setCamp(campName) {
+            game.camp = campName;
+            showModal("СМЕНА ЛАГЕРЯ", `Вы закрепились на новой базе: ${campName}. Сталкеры приняли вас в свой круг.`);
+            renderUI();
+            saveGame();
+        }
+
+        // --- ЛЕЧЕНИЕ И ОЧИСТКА НА БАЗЕ ---
+        function healAtBase() {
+            if (game.rubles < 50) {
+                showModal("НЕДОСТАТОЧНО СРЕДСТВ", "У вас недостаточно рублей для оплаты услуг медика (нужно 50 ₽).");
+                return;
+            }
+            if (game.hp >= game.maxHp) {
+                showModal("ЗДОРОВЬЕ В НОРМЕ", "Вы абсолютно здоровы, лечение не требуется.");
+                return;
+            }
+            game.rubles -= 50;
+            game.hp = game.maxHp;
+            showModal("МЕДПУНКТ", "Местный врач вколол вам стимулятор и обработал раны. Здоровье полностью восстановлено!");
+            renderUI();
+            saveGame();
+        }
+
+        function cleanRadAtBase() {
+            if (game.rubles < 100) {
+                showModal("НЕДОСТАТОЧНО СРЕДСТВ", "Дезактивация стоит 100 рублей.");
+                return;
+            }
+            if (game.radiation <= 0) {
+                showModal("РАДИАЦИЯ ОТСУТСТВУЕТ", "Ваш организм не фонит.");
+                return;
+            }
+            game.rubles -= 100;
+            game.radiation = 0;
+            showModal("ДЕАКТИВАЦИЯ", "Вы прошли процедуру очищения в душевой капсуле. Радиационный фон в норме.");
+            renderUI();
+            saveGame();
+        }
+
+        // --- СИСТЕМА ВЫЛАЗОК В ЗОНУ ---
+        function renderZones() {
+            const grid = document.getElementById('zones-grid');
+            grid.innerHTML = '';
+            zones.forEach(z => {
+                let card = document.createElement('div');
+                card.className = "bg-neutral-900 border border-neutral-800 hover:border-emerald-700/60 p-4 rounded-lg flex flex-col justify-between transition cursor-pointer";
+                card.onclick = () => startExcursion(z);
+                card.innerHTML = `
+                    <div>
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-2xl">${z.icon}</span>
+                            <span class="text-xs px-2 py-0.5 rounded bg-neutral-800 text-amber-400 font-bold">ОПАСНОСТЬ: ${z.danger}/5</span>
+                        </div>
+                        <h3 class="font-bold text-emerald-300 text-sm mb-1">${z.name}</h3>
+                        <p class="text-xs text-neutral-400 mb-3">${z.desc}</p>
+                    </div>
+                    <button class="w-full py-1.5 bg-emerald-950/60 hover:bg-emerald-900 text-emerald-300 border border-emerald-800 rounded text-xs font-bold transition">ВЫЙТИ В СЕКТОР</button>
+                `;
+                grid.appendChild(card);
+            });
+        }
+
+        let currentExcursionState = {
+            zone: null,
+            step: 0,
+            maxSteps: 3,
+            rewardsCollected: 0
+        };
+
+        function startExcursion(zone) {
+            currentExcursionState = {
+                zone: zone,
+                step: 1,
+                maxSteps: 3,
+                rewardsCollected: 0
+            };
+
+            document.getElementById('zone-selection-panel').classList.add('hidden');
+            document.getElementById('zone-action-panel').classList.remove('hidden');
+
+            loadNextExcursionStep();
+        }
+
+        // Случайные события на вылазке
+        const eventTemplates = [
+            {
+                type: "mutants",
+                title: "Стая слепых псов!",
+                text: "Из заброшенных руин выскочила стая голодных мутантов. Они скалят зубы и окружают вас!",
+                choices: [
+                    { text: "Открыть огонь на поражение", action: "fight" },
+                    { text: "Бросить гранату / отбиться и бежать", action: "flee" }
+                ]
+            },
+            {
+                type: "anomaly",
+                title: "Аномальное поле «Электра»",
+                text: "Дорога преграждена синими разрядами статического электричества. Нужно аккуратно пройти или обойти.",
+                choices: [
+                    { text: "Бросить болты и пройти аккуратно", action: "safe_pass" },
+                    { text: "Рвануть напролом", action: "rush_anomaly" }
+                ]
+            },
+            {
+                type: "cache",
+                title: "Схрон погибшего сталкера",
+                text: "Вы обнаружили заброшенный рюкзак под железобетонной плитой. Похоже, хозяин сюда уже не вернется.",
+                choices: [
+                    { text: "Обыскать схрон", action: "loot_cache" },
+                    { text: "Пройти мимо (опасно)", action: "ignore_cache" }
+                ]
+            },
+            {
+                type: "bandits",
+                title: "Бандитский патруль",
+                text: "Двое вооруженных бандитов преградили путь и требуют 'плату за проход по их территории'.",
+                choices: [
+                    { text: "Дать отпор из ствола!", action: "fight_bandits" },
+                    { text: "Откупиться (300 ₽)", action: "pay_bandits" }
+                ]
+            }
+        ];
+
+        let activeEvent = null;
+
+        function loadNextExcursionStep() {
+            if (currentExcursionState.step > currentExcursionState.maxSteps) {
+                endExcursion(true);
+                return;
+            }
+
+            document.getElementById('zone-event-location').innerText = `СЕКТОР: ${currentExcursionState.zone.name}`;
+            document.getElementById('zone-event-step').innerText = `Шаг ${currentExcursionState.step} / ${currentExcursionState.maxSteps}`;
+
+            // Выбираем случайное событие
+            activeEvent = eventTemplates[Math.floor(Math.random() * eventTemplates.length)];
+            
+            document.getElementById('zone-event-description').innerHTML = `<strong class="text-amber-400 block mb-1">${activeEvent.title}</strong>${activeEvent.text}`;
+
+            const choicesDiv = document.getElementById('zone-event-choices');
+            choicesDiv.innerHTML = '';
+
+            activeEvent.choices.forEach(ch => {
+                let btn = document.createElement('button');
+                btn.className = "p-2.5 bg-neutral-950 hover:bg-neutral-800 text-neutral-200 border border-emerald-900/60 rounded text-xs font-bold transition text-left";
+                btn.innerText = ch.text;
+                btn.onclick = () => handleEventChoice(ch.action);
+                choicesDiv.appendChild(btn);
+            });
+        }
+
+        function handleEventChoice(action) {
+            let logMsg = "";
+
+            if (action === "fight" || action === "fight_bandits") {
+                if (game.ammo <= 0) {
+                    let dmg = Math.floor(Math.random() * 25) + 15;
+                    game.hp -= dmg;
+                    logMsg = `У вас закончились патроны! Вы получили отпор и потеряли ${dmg} HP.`;
+                } else {
+                    game.ammo -= Math.floor(Math.random() * 4) + 2;
+                    let rewardRubles = Math.floor(Math.random() * 400) + 200;
+                    game.rubles += rewardRubles;
+                    logMsg = `Вы успешно вступили в бой и победили врага! Добыто рублей: +${rewardRubles} ₽.`;
+                }
+            } else if (action === "flee") {
+                let dmg = Math.floor(Math.random() * 10) + 5;
+                game.hp -= dmg;
+                logMsg = `Вы с боем отступили, получив легкие царапины (-${dmg} HP).`;
+            } else if (action === "safe_pass") {
+                if (Math.random() > 0.3) {
+                    let radGain = Math.floor(Math.random() * 10) + 5;
+                    game.radiation += radGain;
+                    logMsg = `Вы успешно обошли аномалию, но схватили немного радиации (+${radGain} мЗв).`;
+                } else {
+                    let art = { id: "artifact_battery", name: "Артефакт «Батарейка»", type: "artifact", count: 1, weight: 0.5, desc: "Редкий электрический артефакт. Дорого стоит." };
+                    game.inventory.push(art);
+                    logMsg = `Невероятная удача! Обходя аномалию, вы заметили сияющий артефакт «Батарейка»!`;
+                }
+            } else if (action === "rush_anomaly") {
+                let dmg = Math.floor(Math.random() * 30) + 15;
+                game.hp -= dmg;
+                logMsg = `Вас ударило разрядом тока! Получено повреждений: -${dmg} HP.`;
+            } else if (action === "loot_cache") {
+                let foundRub = Math.floor(Math.random() * 500) + 100;
+                game.rubles += foundRub;
+                game.ammo += 15;
+                logMsg = `В схроне оказался схрон с патронами и деньгами (+${foundRub} ₽, +15 патронов).`;
+            } else if (action === "ignore_cache") {
+                logMsg = `Вы решили не рисковать и прошли мимо подозрительного схрона.`;
+            } else if (action === "pay_bandits") {
+                if (game.rubles >= 300) {
+                    game.rubles -= 300;
+                    logMsg = `Вы отдали бандитам 300 рублей, и они пропустили вас без стрельбы.`;
+                } else {
+                    game.hp -= 40;
+                    logMsg = `У вас не хватило денег! Бандиты избили вас и отобрали остатки снаряжения (-40 HP).`;
+                }
+            }
+
+            // Проверка на гибель
+            if (game.hp <= 0) {
+                game.hp = 0;
+                showModal("ПОГИБЛИ В ЗОНЕ", `${logMsg}\n\nВаше тело нашли сталкеры и эвакуировали в лагерь. Вы потеряли сознание и часть накоплений.`);
+                game.rubles = Math.max(0, game.rubles - 500);
+                game.hp = 30;
+                endExcursion(false);
+                return;
+            }
+
+            showModal("ИТОГ СТОЛКНОВЕНИЯ", logMsg);
+            currentExcursionState.step++;
+            loadNextExcursionStep();
+        }
+
+        function endExcursion(success) {
+            document.getElementById('zone-action-panel').classList.add('hidden');
+            document.getElementById('zone-selection-panel').classList.remove('hidden');
+
+            if (success) {
+                showModal("ВЫЛАЗКА ЗАВЕРШЕНА", `Вы успешно вернулись из сектора ${currentExcursionState.zone.name}. Снаряжение проверено, пора отдохнуть у костра.`);
+            }
+            renderUI();
+            saveGame();
+        }
+
+        // --- ИНВЕНТАРЬ И ПРЕДМЕТЫ ---
+        function renderInventory() {
+            // Экипировка
+            document.getElementById('inv-armor').innerText = `${game.armor.name} (Защита: ${game.armor.protection})`;
+            document.getElementById('inv-weapon').innerText = `${game.weapon.name} (Урон: ${game.weapon.damage})`;
+            document.getElementById('inv-ammo').innerText = `${game.ammo} шт.`;
+
+            const list = document.getElementById('inventory-items-grid');
+            list.innerHTML = '';
+
+            if (game.inventory.length === 0) {
+                list.innerHTML = `<div class="text-xs text-neutral-500 italic p-2">Рюкзак пуст.</div>`;
+                return;
+            }
+
+            game.inventory.forEach((item, index) => {
+                let div = document.createElement('div');
+                div.className = "bg-neutral-950 p-2.5 rounded border border-neutral-800 flex justify-between items-center text-xs";
+                
+                let actionBtn = "";
+                if (item.type === 'med' || item.type === 'food' || item.type === 'rad') {
+                    actionBtn = `<button onclick="useInventoryItem(${index})" class="px-2 py-1 bg-emerald-950 hover:bg-emerald-900 text-emerald-300 rounded border border-emerald-700">ИСПОЛЬЗОВАТЬ</button>`;
+                } else if (item.type === 'artifact') {
+                    actionBtn = `<span class="text-amber-400 font-bold">ХАБАР</span>`;
+                }
+
+                div.innerHTML = `
+                    <div>
+                        <strong class="text-neutral-200 block">${item.name} (x${item.count})</strong>
+                        <span class="text-neutral-500 text-[10px]">${item.desc}</span>
+                    </div>
+                    <div>${actionBtn}</div>
+                `;
+                list.appendChild(div);
+            });
+        }
+
+        function useInventoryItem(index) {
+            let item = game.inventory[index];
+            if (item.id === 'bandage') {
+                game.hp = Math.min(game.maxHp, game.hp + 25);
+                showModal("ПРИМЕНЕНИЕ", "Вы наложили стерильный бинт. Здоровье восстановлено (+25 HP).");
+            } else if (item.id === 'medkit') {
+                game.hp = Math.min(game.maxHp, game.hp + 70);
+                showModal("ПРИМЕНЕНИЕ", "Вы использовали армейскую аптечку АИ-2. Раны затянулись (+70 HP).");
+            } else if (item.id === 'antirad') {
+                game.radiation = Math.max(0, game.radiation - 30);
+                showModal("ПРИМЕНЕНИЕ", "Антирадиационный препарат вывел токсины из крови (-30 мЗв).");
+            } else if (item.id === 'bread') {
+                game.hp = Math.min(game.maxHp, game.hp + 10);
+                showModal("ПРИМЕНЕНИЕ", "Вы перекусили сухим сталкерским хлебом (+10 HP).");
+            }
+
+            item.count--;
+            if (item.count <= 0) {
+                game.inventory.splice(index, 1);
+            }
+
+            renderUI();
+            saveGame();
+        }
+
+        // --- ТОРГОВЛЯ С СИДОРОВИЧЕМ ---
+        function renderTrader() {
+            document.getElementById('trader-rubles').innerText = `${game.rubles} ₽`;
+            
+            // Покупка
+            const shopList = document.getElementById('shop-items-list');
+            shopList.innerHTML = '';
+            shopItems.forEach(item => {
+                let div = document.createElement('div');
+                div.className = "bg-neutral-950 p-2.5 rounded border border-neutral-800 flex justify-between items-center text-xs";
+                div.innerHTML = `
+                    <div>
+                        <strong class="text-neutral-200 block">${item.name} — <span class="text-amber-400">${item.price} ₽</span></strong>
+                        <span class="text-neutral-500 text-[10px]">${item.desc}</span>
+                    </div>
+                    <button onclick="buyItem('${item.id}')" class="px-3 py-1 bg-amber-950 hover:bg-amber-900 text-amber-300 rounded border border-amber-700 font-bold">КУПИТЬ</button>
+                `;
+                shopList.appendChild(div);
+            });
+
+            // Продажа
+            const sellList = document.getElementById('sell-items-list');
+            sellList.innerHTML = '';
+            
+            let sellableItems = game.inventory.filter(i => i.type === 'artifact' || i.type === 'food' || i.type === 'med');
+            if (sellableItems.length === 0) {
+                sellList.innerHTML = `<div class="text-xs text-neutral-500 italic p-2">У вас нет предметов на продажу.</div>`;
+                return;
+            }
+
+            sellableItems.forEach((item) => {
+                let originalIndex = game.inventory.indexOf(item);
+                let price = item.type === 'artifact' ? 2500 : 50;
+                let div = document.createElement('div');
+                div.className = "bg-neutral-950 p-2.5 rounded border border-neutral-800 flex justify-between items-center text-xs";
+                div.innerHTML = `
+                    <div>
+                        <strong class="text-neutral-200 block">${item.name} (x${item.count})</strong>
+                        <span class="text-amber-400">Цена: ~${price * item.count} ₽</span>
+                    </div>
+                    <button onclick="sellItem(${originalIndex})" class="px-2.5 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded border border-neutral-700">ПРОДАТЬ</button>
+                `;
+                sellList.appendChild(div);
+            });
+        }
+
+        function buyItem(itemId) {
+            let itemDef = shopItems.find(i => i.id === itemId);
+            if (!itemDef) return;
+
+            if (game.rubles < itemDef.price) {
+                showModal("НЕДОСТАТОЧНО СРЕДСТВ", "У вас недостаточно рублей для покупки этого предмета.");
+                return;
+            }
+
+            game.rubles -= itemDef.price;
+
+            if (itemDef.type === 'weapon') {
+                game.weapon = { name: itemDef.name, damage: itemDef.damage, weight: itemDef.weight };
+                showModal("ПОКУПКА", `Вы приобрели оружие: ${itemDef.name}! Оно сразу экипировано.`);
+            } else if (itemDef.type === 'armor') {
+                game.armor = { name: itemDef.name, protection: itemDef.protection, weight: itemDef.weight };
+                showModal("ПОКУПКА", `Вы приобрели бронекостюм: ${itemDef.name}! Защита усилена.`);
+            } else if (itemDef.type === 'ammo') {
+                game.ammo += itemDef.count;
+                showModal("ПОКУПКА", `Куплены боеприпасы (+${itemDef.count} шт).`);
+            } else {
+                // Добавляем в инвентарь
+                let existing = game.inventory.find(i => i.id === itemDef.id);
+                if (existing) {
+                    existing.count++;
+                } else {
+                    game.inventory.push({ id: itemDef.id, name: itemDef.name, type: itemDef.type, count: 1, weight: itemDef.weight, desc: itemDef.desc });
+                }
+                showModal("ПОКУПКА", `Предмет "${itemDef.name}" добавлен в рюкзак.`);
+            }
+
+            renderUI();
+            saveGame();
+        }
+
+        function sellItem(index) {
+            let item = game.inventory[index];
+            let price = item.type === 'artifact' ? 2500 : 50;
+            let totalEarned = price * item.count;
+
+            game.rubles += totalEarned;
+            game.inventory.splice(index, 1);
+
+            showModal("ПРОДАЖА", `Вы успешно сдали предмет торговцу за ${totalEarned} ₽.`);
+            renderUI();
+            saveGame();
+        }
+
+        function sellAllJunk() {
+            let earned = 0;
+            game.inventory = game.inventory.filter(item => {
+                if (item.type === 'artifact') {
+                    earned += 2500 * item.count;
+                    return false;
+                }
+                return true;
+            });
+
+            if (earned > 0) {
+                game.rubles += earned;
+                showModal("СДЕЛКА", `Сидорович забрал весь редкий хабар. Выручено рублей: +${earned} ₽.`);
+            } else {
+                showModal("НЕТ ХАБАРА", "У вас нет артефактов для оптовой продажи.");
+            }
+            renderUI();
+            saveGame();
+        }
+
+        // --- ВКЛАДКА У КОСТРА ---
+        function nextCampfireStory() {
+            let randomStory = campfireStories[Math.floor(Math.random() * campfireStories.length)];
+            document.getElementById('campfire-story-box').innerText = `"${randomStory}"`;
+            game.hp = Math.min(game.maxHp, game.hp + 5);
+            renderUI();
+        }
+
+        function singGuitarSong() {
+            document.getElementById('campfire-story-box').innerText = `"Тихий вечер над Золотой Долиной... Вы берете аккорды на старой потрепанной гитаре. Сталкеры молча слушают, вспоминая тех, кто не вернулся из рейдов."`;
+            playGuitarSound();
+            renderUI();
+        }
+
+        // --- АУДИОПРЕДУПРЕЖДЕНИЯ (Web Audio API) ---
+        let audioCtx = null;
+        let isAudioEnabled = false;
+
+        function toggleAudio() {
+            isAudioEnabled = !isAudioEnabled;
+            const btn = document.getElementById('audio-toggle');
+            if (isAudioEnabled) {
+                btn.innerText = "ВКЛ";
+                btn.className = "px-2 py-0.5 bg-emerald-900 text-emerald-200 border border-emerald-600 rounded transition";
+                initAudio();
+                playGeigerClick();
+            } else {
+                btn.innerText = "ВЫКЛ";
+                btn.className = "px-2 py-0.5 bg-neutral-800 text-neutral-300 border border-neutral-700 rounded transition";
+            }
+        }
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }
+
+        function playGeigerClick() {
+            if (!isAudioEnabled || !audioCtx) return;
+            try {
+                let osc = audioCtx.createOscillator();
+                let gain = audioCtx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(1200, audioCtx.currentTime);
+                gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.03);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.03);
+            } catch(e) {}
+        }
+
+        function playGuitarSound() {
+            if (!isAudioEnabled || !audioCtx) return;
+            try {
+                // Мелодичный аккорд
+                [261.63, 329.63, 392.00, 523.25].forEach((freq, idx) => {
+                    setTimeout(() => {
+                        let osc = audioCtx.createOscillator();
+                        let gain = audioCtx.createGain();
+                        osc.type = 'sine';
+                        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+                        gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+                        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.8);
+                        osc.connect(gain);
+                        gain.connect(audioCtx.destination);
+                        osc.start();
+                        osc.stop(audioCtx.currentTime + 0.8);
+                    }, idx * 120);
+                });
+            } catch(e) {}
+        }
+
+        // --- СОХРАНЕНИЕ В LOCALSTORAGE ---
+        function saveGame() {
+            try {
+                localStorage.setItem('stalzone_save_v1', JSON.stringify(game));
+                document.getElementById('footer-status').innerText = "ПРОГРЕСС СОХРАНЕН";
+                setTimeout(() => {
+                    document.getElementById('footer-status').innerText = "СИСТЕМА В НОРМЕ";
+                }, 2500);
+            } catch(e) {
+                console.error("Не удалось сохранить игру", e);
+            }
+        }
+
+        function loadGame() {
+            try {
+                let saved = localStorage.getItem('stalzone_save_v1');
+                if (saved) {
+                    let parsed = JSON.parse(saved);
+                    game = { ...game, ...parsed };
+                }
+            } catch(e) {
+                console.error("Ошибка загрузки сохранения", e);
+            }
+        }
+
+        function resetGame() {
+            if (confirm("Вы уверены, что хотите сбросить весь прогресс и начать жизнь сталкера заново?")) {
+                localStorage.removeItem('stalzone_save_v1');
+                location.reload();
+            }
+        }
+
+        // --- ИНИЦИАЛИЗАЦИЯ ПРИ ЗАГРУЗКЕ ---
+        window.onload = function() {
+            loadGame();
+            renderUI();
+            
+            // Периодическое легкое фоновое шуршание счетчика Гейгера при наличии радиации
+            setInterval(() => {
+                if (game.radiation > 0 && Math.random() < 0.4) {
+                    playGeigerClick();
+                }
+            }, 3000);
+        };
+    </script>
+</body>
+</html>
